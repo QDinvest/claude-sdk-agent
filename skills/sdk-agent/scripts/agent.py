@@ -69,11 +69,22 @@ def describe_tool(block: ToolUseBlock) -> str:
     return f"  {DIM}[{block.name}] {str(detail)[:120]}{RESET}"
 
 
+AUTO_APPROVE = False  # set by --yes
+ALWAYS_ALLOWED: set = set()  # tools you answered "a" for, this run only
+
+
 async def ask_permission(tool_name, tool_input, context):
-    # File edits inside the folder are auto-approved (acceptEdits); everything else asks you first.
+    # File edits inside the folder are auto-approved (acceptEdits). Everything else asks you first,
+    # unless you started with --yes or answered "a" for this tool earlier in the run.
+    if AUTO_APPROVE or tool_name in ALWAYS_ALLOWED:
+        return PermissionResultAllow(behavior="allow")
     shown = tool_input.get("command") or json.dumps(tool_input)[:300]
-    answer = await anyio.to_thread.run_sync(input, f"\n  {YELLOW}Allow {tool_name}:{RESET} {shown}\n  {YELLOW}[y/N] >{RESET} ")
-    if answer.strip().lower() in ("y", "yes"):
+    prompt = f"\n  {YELLOW}Allow {tool_name}:{RESET} {shown}\n  {YELLOW}[y = yes, a = always allow {tool_name} this run, N = no] >{RESET} "
+    answer = (await anyio.to_thread.run_sync(input, prompt)).strip().lower()
+    if answer in ("a", "always"):
+        ALWAYS_ALLOWED.add(tool_name)
+        return PermissionResultAllow(behavior="allow")
+    if answer in ("y", "yes"):
         return PermissionResultAllow(behavior="allow")
     return PermissionResultDeny(behavior="deny", message="The user declined this action.")
 
@@ -84,7 +95,11 @@ async def main() -> None:
     p.add_argument("--new", action="store_true", help="start a fresh chat instead of continuing")
     p.add_argument("--model", default="claude-sonnet-5-5")
     p.add_argument("--budget", type=float, default=2.0, help="max US$ per message (default 2.00)")
+    p.add_argument("--yes", action="store_true", help="approve every action without asking (use with care)")
     args = p.parse_args()
+
+    global AUTO_APPROVE
+    AUTO_APPROVE = args.yes
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("ANTHROPIC_API_KEY is not set in this window. Set it first.")
@@ -103,7 +118,10 @@ async def main() -> None:
     )
 
     print(f"{DIM}Folder: {folder}{RESET}")
-    print(f"{DIM}Model: {args.model} | {'continuing previous chat' if resume else 'new chat'} | type 'exit' to quit{RESET}\n")
+    print(f"{DIM}Model: {args.model} | {'continuing previous chat' if resume else 'new chat'} | type 'exit' to quit{RESET}")
+    if AUTO_APPROVE:
+        print(f"{RED}--yes is on: commands run without asking.{RESET}")
+    print()
 
     run_total = 0.0
     async with ClaudeSDKClient(options=options) as client:

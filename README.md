@@ -39,7 +39,7 @@ The plan:
 
 you > check that python works here
   Allow Bash: python --version
-  [y/N] > y
+  [y = yes, a = always allow Bash this run, N = no] > y
   [Bash] python --version
 
 claude > Python 3.11.9 is installed, so the script will run here.
@@ -50,7 +50,7 @@ you > exit
 ```
 
 - Lines in `[brackets]` are what the agent is doing: reading, searching, writing.
-- `Allow ... [y/N]` is the agent asking first. Type `y` to allow or press Enter to refuse.
+- `Allow ...` is the agent asking first. Type `y` to allow, `a` to stop asking about that kind of action for this run, or press Enter to refuse.
 - After each reply you see what that message cost and the total since you started.
 - In a real terminal it's in color: your prompt green, Claude orange, tool steps dimmed, permission prompts yellow.
 
@@ -136,6 +136,7 @@ Options go on the start command, not inside the chat. Typing `--budget 10` into 
 | `--new` | Start a fresh chat in this folder | continue the last chat |
 | `--model <id>` | Choose the model, e.g. `claude-opus-5-5` | `claude-sonnet-5-5` |
 | `--budget <usd>` | Spending cap for each message | `2.00` |
+| `--yes` | Approve every action without asking. Use with care | off (asks) |
 
 Example:
 
@@ -146,7 +147,8 @@ python ~/claude-sdk-agent/skills/sdk-agent/scripts/agent.py --model claude-opus-
 ## What it can and can't do on its own
 
 - **File edits** inside the working folder happen **without asking**. Use it in a git repo, or commit first, so you can review and undo changes.
-- **Everything else** (running commands, web access) asks `y/N` first.
+- **Everything else** (running commands, web access) asks first. Answer `y` to allow once, `a` to always allow that kind of action for the rest of this run, or press Enter to refuse.
+- **`--yes`** skips every question. Commands then run unchecked, including deletes and commands in other folders, so only use it in a repo you've committed and can restore.
 - **Costs** print after every reply. The `--budget` cap stops one runaway message, not a long session.
 - **Chats** are saved per folder in `~/.claude-agent-sessions.json`.
 - Set `NO_COLOR=1` to turn off color.
