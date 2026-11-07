@@ -105,6 +105,7 @@ async def main() -> None:
     print(f"{DIM}Folder: {folder}{RESET}")
     print(f"{DIM}Model: {args.model} | {'continuing previous chat' if resume else 'new chat'} | type 'exit' to quit{RESET}\n")
 
+    run_total = 0.0
     async with ClaudeSDKClient(options=options) as client:
         while True:
             try:
@@ -127,9 +128,16 @@ async def main() -> None:
                 elif isinstance(msg, ResultMessage):
                     if msg.session_id:
                         save_session(folder, msg.session_id)
-                    cost = f"${msg.total_cost_usd:.4f}" if msg.total_cost_usd is not None else "n/a"
+                    total = msg.total_cost_usd
+                    if total is None:
+                        cost = "cost n/a"
+                    else:
+                        # total_cost_usd is the running total for this run; the difference is this message.
+                        this_msg = total - run_total if total >= run_total else total
+                        run_total = total
+                        cost = f"this message ${this_msg:.4f} | total this run ${total:.4f}"
                     status = f"{RED}error: {msg.subtype}{RESET}{DIM}" if msg.is_error else "done"
-                    print(f"\n{DIM}[{status} | this message cost {cost}]{RESET}\n")
+                    print(f"\n{DIM}[{status} | {cost}]{RESET}\n")
 
 
 if __name__ == "__main__":
