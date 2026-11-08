@@ -105,7 +105,7 @@ cd ~/path/to/your/project
 python ~/claude-sdk-agent/skills/sdk-agent/scripts/agent.py
 ```
 
-At the `you >` prompt, type what you want in plain English, for example `explain how this project is organized` or `add a test for the login function`. Type `exit` to quit.
+At the `you ›` prompt, type what you want in plain English, for example `explain how this project is organized` or `add a test for the login function`. Type `exit` to quit.
 
 Run the same command in the same folder later and it **continues that chat**.
 
