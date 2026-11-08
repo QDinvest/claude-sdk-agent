@@ -130,6 +130,14 @@ If your purchased balance went down, your promo grant doesn't cover the Agent SD
 
 Options go on the start command, not inside the chat. Typing `--budget 10` into a message does nothing.
 
+Inside the chat you can type:
+
+| Command | What it does |
+|---|---|
+| `/model claude-opus-5-5` | Switch model without restarting |
+| `/yes` | Turn auto-approve on or off |
+| `exit` | Quit (the chat is saved) |
+
 | Option | What it does | Default |
 |---|---|---|
 | `--dir <folder>` | Work in that folder instead of the current one | current folder |

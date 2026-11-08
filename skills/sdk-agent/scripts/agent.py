@@ -134,6 +134,18 @@ async def main() -> None:
                 break
             if not prompt.strip():
                 continue
+            if prompt.strip().startswith("/model"):
+                parts = prompt.split()
+                if len(parts) == 2:
+                    await client.set_model(parts[1])
+                    print(f"{DIM}Model is now {parts[1]}.{RESET}\n")
+                else:
+                    print(f"{DIM}Usage: /model claude-opus-5-5{RESET}\n")
+                continue
+            if prompt.strip() == "/yes":
+                AUTO_APPROVE = not AUTO_APPROVE
+                print(f"{RED if AUTO_APPROVE else DIM}Auto-approve is {'on: commands run without asking' if AUTO_APPROVE else 'off: commands ask first'}.{RESET}\n")
+                continue
 
             await client.query(prompt)
             async for msg in client.receive_response():
