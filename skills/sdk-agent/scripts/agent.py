@@ -124,50 +124,72 @@ async def main() -> None:
     print()
 
     run_total = 0.0
-    async with ClaudeSDKClient(options=options) as client:
-        while True:
-            try:
-                prompt = await anyio.to_thread.run_sync(input, f"{GREEN}you >{RESET} ")
-            except EOFError:
-                break
-            if prompt.strip().lower() in ("exit", "quit"):
-                break
-            if not prompt.strip():
-                continue
-            if prompt.strip().startswith("/model"):
-                parts = prompt.split()
-                if len(parts) == 2:
-                    await client.set_model(parts[1])
-                    print(f"{DIM}Model is now {parts[1]}.{RESET}\n")
-                else:
-                    print(f"{DIM}Usage: /model claude-opus-5-5{RESET}\n")
-                continue
-            if prompt.strip() == "/yes":
-                AUTO_APPROVE = not AUTO_APPROVE
-                print(f"{RED if AUTO_APPROVE else DIM}Auto-approve is {'on: commands run without asking' if AUTO_APPROVE else 'off: commands ask first'}.{RESET}\n")
-                continue
-
-            await client.query(prompt)
-            async for msg in client.receive_response():
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock) and block.text.strip():
-                            print(f"\n{ORANGE}claude >{RESET} {style(block.text)}")
-                        elif isinstance(block, ToolUseBlock):
-                            print(describe_tool(block))
-                elif isinstance(msg, ResultMessage):
-                    if msg.session_id:
-                        save_session(folder, msg.session_id)
-                    total = msg.total_cost_usd
-                    if total is None:
-                        cost = "cost n/a"
+    while True:  # each pass is one connection; /budget reconnects to the same chat with the new cap
+        reconnect = False
+        client_total = 0.0  # the SDK's running cost restarts with each connection
+        async with ClaudeSDKClient(options=options) as client:
+            while True:
+                try:
+                    prompt = await anyio.to_thread.run_sync(input, f"{GREEN}you >{RESET} ")
+                except EOFError:
+                    return
+                cmd = prompt.strip()
+                if cmd.lower() in ("exit", "quit"):
+                    return
+                if not cmd:
+                    continue
+                if cmd.startswith("/model"):
+                    parts = cmd.split()
+                    if len(parts) == 2:
+                        await client.set_model(parts[1])
+                        options.model = parts[1]
+                        print(f"{DIM}Model is now {parts[1]}.{RESET}\n")
                     else:
-                        # total_cost_usd is the running total for this run; the difference is this message.
-                        this_msg = total - run_total if total >= run_total else total
-                        run_total = total
-                        cost = f"this message ${this_msg:.4f} | total this run ${total:.4f}"
-                    status = f"{RED}error: {msg.subtype}{RESET}{DIM}" if msg.is_error else "done"
-                    print(f"\n{DIM}[{status} | {cost}]{RESET}\n")
+                        print(f"{DIM}Usage: /model claude-opus-5-5{RESET}\n")
+                    continue
+                if cmd.startswith("/budget"):
+                    parts = cmd.split()
+                    try:
+                        value = float(parts[1].lstrip("$"))
+                        if value <= 0:
+                            raise ValueError
+                    except (IndexError, ValueError):
+                        print(f"{DIM}Usage: /budget 5   (max US$ per message){RESET}\n")
+                        continue
+                    options.max_budget_usd = value
+                    reconnect = True
+                    print(f"{DIM}Budget is now ${value:.2f} per message. Reconnecting to the same chat...{RESET}\n")
+                    break
+                if cmd == "/yes":
+                    AUTO_APPROVE = not AUTO_APPROVE
+                    print(f"{RED if AUTO_APPROVE else DIM}Auto-approve is {'on: commands run without asking' if AUTO_APPROVE else 'off: commands ask first'}.{RESET}\n")
+                    continue
+
+                await client.query(prompt)
+                async for msg in client.receive_response():
+                    if isinstance(msg, AssistantMessage):
+                        for block in msg.content:
+                            if isinstance(block, TextBlock) and block.text.strip():
+                                print(f"\n{ORANGE}claude >{RESET} {style(block.text)}")
+                            elif isinstance(block, ToolUseBlock):
+                                print(describe_tool(block))
+                    elif isinstance(msg, ResultMessage):
+                        if msg.session_id:
+                            save_session(folder, msg.session_id)
+                            options.resume = msg.session_id  # so a reconnect continues this chat
+                        total = msg.total_cost_usd
+                        if total is None:
+                            cost = "cost n/a"
+                        else:
+                            # total_cost_usd is the running total for this connection; the difference is this message.
+                            this_msg = total - client_total if total >= client_total else total
+                            client_total = total
+                            run_total += this_msg
+                            cost = f"this message ${this_msg:.4f} | total this run ${run_total:.4f}"
+                        status = f"{RED}error: {msg.subtype}{RESET}{DIM}" if msg.is_error else "done"
+                        print(f"\n{DIM}[{status} | {cost}]{RESET}\n")
+        if not reconnect:
+            return
 
 
 if __name__ == "__main__":

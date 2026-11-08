@@ -135,6 +135,7 @@ Inside the chat you can type:
 | Command | What it does |
 |---|---|
 | `/model claude-opus-5-5` | Switch model without restarting |
+| `/budget 5` | Change the per-message spending cap. Reconnects to the same chat |
 | `/yes` | Turn auto-approve on or off |
 | `exit` | Quit (the chat is saved) |
 
