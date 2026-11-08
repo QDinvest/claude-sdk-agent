@@ -10,48 +10,41 @@ It's built on Anthropic's [Claude Agent SDK](https://pypi.org/project/claude-age
 
 ## What a session looks like
 
-The first two messages below are from a real run (the long reply is shortened). The third shows how a permission prompt looks.
+The messages below are from a real run (long replies are shortened). The permission prompt shows how one looks.
 
 ```text
-PS C:\Users\you\codemap> python $HOME\claude-sdk-agent\skills\sdk-agent\scripts\agent.py
-Folder: C:\Users\you\codemap
-Model: claude-sonnet-5-5 | new chat | type 'exit' to quit
+PS C:\Users\you\codemap> python $HOME\claude-sdk-agent\skills\sdk-agent\scripts\agent.py --budget 10
 
-you > hi
+┌ claude-sdk-agent · runs on your API credits
+│ folder  C:\Users\you\codemap
+│ model   claude-sonnet-5-5
+│ budget  $10.00 per message
+│ chat    continuing "Codemap building plan" · last active 10 h ago
+└ /help for commands · exit to quit
 
-claude > Hi. What do you want to work on in `codemap`?
+Where you left off · 12 messages so far
+  you     can you bring up the plan for building this codemap
+  claude  Status: nothing is built yet. The only file in codemap is PLAN.md.
+          The plan: 1. No installs: one Python stdlib script ... …
 
-[done | this message $0.0774 | total this run $0.0774]
+you › check that python works here
 
-you > can you bring up the plan for building this codemap
-  [Glob] **/*
-  [Read] C:\Users\you\codemap\PLAN.md
+  ? Allow Bash python --version
+    y = yes · a = always allow Bash this run · Enter = no › y
+  · Bash   python --version
 
-claude > Status: nothing is built yet. The only file in `codemap` is `PLAN.md`.
+● claude
+  Python 3.11.9 is installed, so the script will run here.
 
-The plan:
-1. No installs: one Python stdlib script, `scripts/codemap.py`.
-2. Session-start hook that points the agent to `.codemap/MAP.md`.
-3. Four agent commands: find, file, map, build.
-...
+── done · this message $0.0312 · total this run $0.0312 · claude-sonnet-5-5 ──────
 
-[done | this message $0.0476 | total this run $0.1250]
-
-you > check that python works here
-  Allow Bash: python --version
-  [y = yes, a = always allow Bash this run, N = no] > y
-  [Bash] python --version
-
-claude > Python 3.11.9 is installed, so the script will run here.
-
-[done | this message $0.0312 | total this run $0.1562]
-
-you > exit
+you › exit
 ```
 
-- Lines in `[brackets]` are what the agent is doing: reading, searching, writing.
-- `Allow ...` is the agent asking first. Type `y` to allow, `a` to stop asking about that kind of action for this run, or press Enter to refuse.
-- After each reply you see what that message cost and the total since you started.
+- When you come back to a folder, the box at the top shows the chat's title and when you last used it, then **Where you left off** shows your last message and the start of Claude's last reply. It's read from the saved chat, so it costs nothing.
+- Lines starting with `·` are what the agent is doing: reading, searching, writing.
+- `? Allow ...` is the agent asking first. Type `y` to allow, `a` to stop asking about that kind of action for this run, or press Enter to refuse.
+- The line after each reply shows what that message cost, the total since you started, and the model used.
 - In a real terminal it's in color: your prompt green, Claude orange, tool steps dimmed, permission prompts yellow.
 
 ## Setup, step by step

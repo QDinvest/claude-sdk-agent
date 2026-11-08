@@ -13,8 +13,11 @@ import argparse
 import json
 import os
 import re
-import urllib.request
+import shutil
 import sys
+import textwrap
+import time
+import urllib.request
 from pathlib import Path
 
 import anyio
@@ -27,6 +30,8 @@ from claude_agent_sdk import (
     ResultMessage,
     TextBlock,
     ToolUseBlock,
+    get_session_messages,
+    list_sessions,
 )
 
 SESSIONS_FILE = Path.home() / ".claude-agent-sessions.json"
@@ -51,6 +56,66 @@ def style(text: str) -> str:
     return re.sub(r"`([^`\n]+)`", lambda m: CYAN + m.group(1) + RESET, text)
 
 
+try:
+    sys.stdout.reconfigure(errors="replace")  # never crash on a character the console can't show
+except AttributeError:
+    pass
+WIDTH = max(40, min(shutil.get_terminal_size((90, 20)).columns, 100))
+
+
+def rule(label: str) -> str:
+    """A dim line across the terminal with a label in it: ── label ─────"""
+    visible = len(re.sub(r"\033\[[\d;]*m", "", label))
+    return f"{DIM}── {label} {'─' * max(2, WIDTH - visible - 4)}{RESET}"
+
+
+def indent(text: str, pad: str = "  ") -> str:
+    return "\n".join(pad + line for line in text.splitlines())
+
+
+def ago(ms: int) -> str:
+    s = time.time() - ms / 1000
+    for unit, n in (("day", 86400), ("h", 3600), ("min", 60)):
+        if s >= n:
+            v = int(s // n)
+            return f"{v} {unit}{'s' if unit == 'day' and v > 1 else ''} ago"
+    return "just now"
+
+
+def load_history(session_id: str, folder: str):
+    """Title, last-active time, your messages and Claude's replies from a saved chat. Read locally, costs nothing."""
+    try:
+        msgs = get_session_messages(session_id, directory=folder)
+        info = next((s for s in list_sessions(directory=folder) if s.session_id == session_id), None)
+    except Exception:
+        return None, [], []
+
+    def text_of(m) -> str:
+        content = m.message.get("content") if isinstance(m.message, dict) else None
+        if isinstance(content, str):
+            return content.strip()
+        return " ".join(b.get("text", "") for b in content or [] if isinstance(b, dict) and b.get("type") == "text").strip()
+
+    asks = [t for m in msgs if m.type == "user" and (t := text_of(m)) and not t.startswith(("<", "[Request interrupted"))]
+    replies = [t for m in msgs if m.type == "assistant" and (t := text_of(m))]
+    return info, asks, replies
+
+
+def show_recap(asks: list, replies: list) -> None:
+    """Print where the chat left off: your last message and the start of Claude's last reply."""
+    print(f"{BOLD}Where you left off{RESET} {DIM}· {len(asks)} messages so far{RESET}")
+    for who, color, text, max_lines in (("you", GREEN, asks[-1], 2), ("claude", ORANGE, replies[-1] if replies else "", 6)):
+        lines = textwrap.wrap(" ".join(text.replace("#", "").split()), WIDTH - 12)
+        if not lines:
+            continue
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            lines[-1] += " …"
+        for i, line in enumerate(lines):
+            print(f"  {color}{who if i == 0 else '':<7}{RESET} {style(line)}")
+    print()
+
+
 def load_sessions() -> dict:
     try:
         return json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
@@ -67,7 +132,7 @@ def save_session(folder: str, session_id: str) -> None:
 def describe_tool(block: ToolUseBlock) -> str:
     i = block.input or {}
     detail = i.get("file_path") or i.get("command") or i.get("pattern") or i.get("path") or ""
-    return f"  {DIM}[{block.name}] {str(detail)[:120]}{RESET}"
+    return f"  {DIM}· {block.name:<6} {str(detail)[:WIDTH - 12]}{RESET}"
 
 
 AUTO_MODEL = False  # set by --auto or /auto
@@ -106,7 +171,7 @@ async def ask_permission(tool_name, tool_input, context):
     if AUTO_APPROVE or tool_name in ALWAYS_ALLOWED:
         return PermissionResultAllow(behavior="allow")
     shown = tool_input.get("command") or json.dumps(tool_input)[:300]
-    prompt = f"\n  {YELLOW}Allow {tool_name}:{RESET} {shown}\n  {YELLOW}[y = yes, a = always allow {tool_name} this run, N = no] >{RESET} "
+    prompt = f"\n  {YELLOW}{BOLD}? Allow {tool_name}{RESET} {shown}\n  {YELLOW}  y = yes · a = always allow {tool_name} this run · Enter = no ›{RESET} "
     answer = (await anyio.to_thread.run_sync(input, prompt)).strip().lower()
     if answer in ("a", "always"):
         ALWAYS_ALLOWED.add(tool_name)
@@ -177,11 +242,25 @@ async def main() -> None:
         system_prompt={"type": "preset", "preset": "claude_code"},
     )
 
-    print(f"{DIM}Folder: {folder}{RESET}")
-    print(f"{DIM}Model: {'auto (Haiku, Sonnet or Opus by difficulty)' if AUTO_MODEL else args.model} | {'continuing previous chat' if resume else 'new chat'} | /help for commands, 'exit' to quit{RESET}")
+    info, asks, replies = load_history(resume, folder) if resume else (None, [], [])
+    if resume:
+        chat = "continuing"
+        if info:
+            chat += f' "{info.summary[:60]}" · last active {ago(info.last_modified)}'
+    else:
+        chat = "new chat"
+    bar = f"{ORANGE}│{RESET}"
+    print(f"\n{ORANGE}┌{RESET} {BOLD}claude-sdk-agent{RESET} {DIM}· runs on your API credits{RESET}")
+    for key, value in (("folder", folder),
+                       ("model", "auto (Haiku, Sonnet or Opus by difficulty)" if AUTO_MODEL else args.model),
+                       ("budget", f"${args.budget:.2f} per message"),
+                       ("chat", chat)):
+        print(f"{bar} {DIM}{key:<7}{RESET} {value}")
     if AUTO_APPROVE:
-        print(f"{RED}--yes is on: commands run without asking.{RESET}")
-    print()
+        print(f"{bar} {RED}{'approve':<7} --yes is on: commands run without asking{RESET}")
+    print(f"{ORANGE}└{RESET} {DIM}/help for commands · exit to quit{RESET}\n")
+    if asks:
+        show_recap(asks, replies)
 
     run_total = 0.0
     last_prompt = ""
@@ -191,7 +270,7 @@ async def main() -> None:
         async with ClaudeSDKClient(options=options) as client:
             while True:
                 try:
-                    prompt = await anyio.to_thread.run_sync(input, f"{GREEN}you >{RESET} ")
+                    prompt = await anyio.to_thread.run_sync(input, f"{GREEN}{BOLD}you ›{RESET} ")
                 except EOFError:
                     return
                 cmd = prompt.strip()
@@ -251,7 +330,7 @@ async def main() -> None:
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if isinstance(block, TextBlock) and block.text.strip():
-                                print(f"\n{ORANGE}claude >{RESET} {style(block.text)}")
+                                print(f"\n{ORANGE}{BOLD}● claude{RESET}\n{indent(style(block.text.strip()))}")
                             elif isinstance(block, ToolUseBlock):
                                 print(describe_tool(block))
                     elif isinstance(msg, ResultMessage):
@@ -266,9 +345,9 @@ async def main() -> None:
                             this_msg = total - client_total if total >= client_total else total
                             client_total = total
                             run_total += this_msg
-                            cost = f"this message ${this_msg:.4f} | total this run ${run_total:.4f}"
+                            cost = f"this message ${this_msg:.4f} · total this run ${run_total:.4f}"
                         status = f"{RED}error: {msg.subtype}{RESET}{DIM}" if msg.is_error else "done"
-                        print(f"\n{DIM}[{status} | {cost}]{RESET}\n")
+                        print(f"\n{rule(f'{status} · {cost} · {options.model}')}\n")
         if not reconnect:
             return
 
