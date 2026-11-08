@@ -134,7 +134,8 @@ Inside the chat you can type:
 
 | Command | What it does |
 |---|---|
-| `/model claude-opus-5-5` | Switch model without restarting |
+| `/model claude-opus-5-5` | Switch model without restarting (turns auto-switch off) |
+| `/auto` | Turn the difficulty-based auto-switch on or off |
 | `/budget 5` | Change the per-message spending cap. Reconnects to the same chat |
 | `/new` | Start a fresh chat in this folder |
 | `/help` | List these commands |
@@ -148,12 +149,30 @@ Inside the chat you can type:
 | `--model <id>` | Choose the model, e.g. `claude-opus-5-5` | `claude-sonnet-5-5` |
 | `--budget <usd>` | Spending cap for each message | `2.00` |
 | `--yes` | Approve every action without asking. Use with care | off (asks) |
+| `--auto` | Pick Haiku, Sonnet or Opus for each message by how hard it is | off |
 
 Example:
 
 ```bash
 python ~/claude-sdk-agent/skills/sdk-agent/scripts/agent.py --model claude-opus-5-5 --budget 5
 ```
+
+### Auto-switch (`--auto` or `/auto`)
+
+Before each message, a quick Haiku call rates the request and picks the model:
+
+| Rating | Examples | Model |
+|---|---|---|
+| easy | questions, explanations, one-line edits, running a command | Haiku |
+| medium | feature work, a bug fix in one area, writing tests | Sonnet |
+| hard | design, multi-file refactors, tricky debugging, planning | Opus |
+
+You see the choice before each reply, like `auto: hard -> claude-opus-5-5`. Short follow-ups such as "yes" or "keep going" stay on the previous level. If the rating call fails, it uses Sonnet.
+
+Things to know:
+- The rating call costs a fraction of a cent and isn't included in the per-message cost line.
+- Switching models mid-chat skips the prompt cache for that turn, so frequent switching on a long chat costs a little more.
+- `/model` picks a model by hand and turns auto-switch off. `/auto` turns it back on.
 
 ## What it can and can't do on its own
 

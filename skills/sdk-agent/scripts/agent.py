@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import re
+import urllib.request
 import sys
 from pathlib import Path
 
@@ -69,6 +70,32 @@ def describe_tool(block: ToolUseBlock) -> str:
     return f"  {DIM}[{block.name}] {str(detail)[:120]}{RESET}"
 
 
+AUTO_MODEL = False  # set by --auto or /auto
+AUTO_MODELS = {"easy": "claude-haiku-5-5", "medium": "claude-sonnet-5-5", "hard": "claude-opus-5-5"}
+ROUTER_PROMPT = """Rate how hard this request to a coding agent is. Reply with one word: easy, medium or hard.
+easy: questions, explanations, small lookups, one-line edits, running a single command.
+medium: normal feature work, a bug fix in one area, writing tests, edits across a few files.
+hard: architecture or design, multi-file refactors, tricky debugging, performance or security work, planning large work.
+A short follow-up such as "yes", "do it" or "continue" has the same level as the previous request."""
+
+
+def rate_difficulty(prompt: str, previous: str) -> str:
+    """Ask Haiku how hard the request is. Falls back to medium if the call fails."""
+    text = f"Previous request: {previous[:1500] or '(none)'}\n\nThis request: {prompt[:3000]}"
+    body = json.dumps({"model": AUTO_MODELS["easy"], "max_tokens": 200, "system": ROUTER_PROMPT,
+                       "messages": [{"role": "user", "content": text}]}).encode("utf-8")
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
+        "x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01",
+        "content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            reply = json.loads(r.read().decode("utf-8"))
+        word = " ".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text").lower()
+    except Exception:
+        return "medium"
+    return next((level for level in ("hard", "medium", "easy") if level in word), "medium")
+
+
 AUTO_APPROVE = False  # set by --yes
 ALWAYS_ALLOWED: set = set()  # tools you answered "a" for, this run only
 
@@ -91,7 +118,8 @@ async def ask_permission(tool_name, tool_input, context):
 
 PROG = os.path.basename(sys.argv[0]) or "agent.py"
 CHAT_HELP = """Inside the chat:
-  /model claude-opus-5-5   switch model
+  /model claude-opus-5-5   switch model (turns auto-switch off)
+  /auto                    pick the model by task difficulty, on or off
   /budget 5                change the max US$ per message
   /new                     start a fresh chat in this folder
   /yes                     turn auto-approve on or off
@@ -104,6 +132,7 @@ def examples() -> str:
   python {PROG} --budget 50
   python {PROG} --model claude-opus-5-5 --budget 10
   python {PROG} --new        start a fresh chat in this folder
+  python {PROG} --auto       pick Haiku, Sonnet or Opus per message by difficulty
 
 {CHAT_HELP}"""
 
@@ -116,7 +145,7 @@ class Parser(argparse.ArgumentParser):
 async def main() -> None:
     p = Parser(
         description="Claude agent chat on API credits",
-        usage=f"python {PROG} --model ID --budget USD --new --yes --dir FOLDER   (every option is optional)",
+        usage=f"python {PROG} --model ID --budget USD --new --yes --auto --dir FOLDER   (every option is optional)",
         epilog=examples(),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -125,10 +154,12 @@ async def main() -> None:
     p.add_argument("--model", default="claude-sonnet-5-5")
     p.add_argument("--budget", type=float, default=2.0, help="max US$ per message (default 2.00)")
     p.add_argument("--yes", action="store_true", help="approve every action without asking (use with care)")
+    p.add_argument("--auto", action="store_true", help="pick Haiku, Sonnet or Opus for each message by difficulty")
     args = p.parse_args()
 
-    global AUTO_APPROVE
+    global AUTO_APPROVE, AUTO_MODEL
     AUTO_APPROVE = args.yes
+    AUTO_MODEL = args.auto
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("ANTHROPIC_API_KEY is not set in this window. Set it first.")
@@ -147,12 +178,13 @@ async def main() -> None:
     )
 
     print(f"{DIM}Folder: {folder}{RESET}")
-    print(f"{DIM}Model: {args.model} | {'continuing previous chat' if resume else 'new chat'} | /help for commands, 'exit' to quit{RESET}")
+    print(f"{DIM}Model: {'auto (Haiku, Sonnet or Opus by difficulty)' if AUTO_MODEL else args.model} | {'continuing previous chat' if resume else 'new chat'} | /help for commands, 'exit' to quit{RESET}")
     if AUTO_APPROVE:
         print(f"{RED}--yes is on: commands run without asking.{RESET}")
     print()
 
     run_total = 0.0
+    last_prompt = ""
     while True:  # each pass is one connection; /budget reconnects to the same chat with the new cap
         reconnect = False
         client_total = 0.0  # the SDK's running cost restarts with each connection
@@ -172,7 +204,8 @@ async def main() -> None:
                     if len(parts) == 2:
                         await client.set_model(parts[1])
                         options.model = parts[1]
-                        print(f"{DIM}Model is now {parts[1]}.{RESET}\n")
+                        AUTO_MODEL = False
+                        print(f"{DIM}Model is now {parts[1]} (auto-switch off).{RESET}\n")
                     else:
                         print(f"{DIM}Usage: /model claude-opus-5-5{RESET}\n")
                     continue
@@ -197,11 +230,22 @@ async def main() -> None:
                 if cmd == "/help":
                     print(f"{DIM}{CHAT_HELP}{RESET}\n")
                     continue
+                if cmd == "/auto":
+                    AUTO_MODEL = not AUTO_MODEL
+                    print(f"{DIM}Auto-switch is {'on: each message picks Haiku, Sonnet or Opus by difficulty' if AUTO_MODEL else 'off: staying on ' + str(options.model)}.{RESET}\n")
+                    continue
                 if cmd == "/yes":
                     AUTO_APPROVE = not AUTO_APPROVE
                     print(f"{RED if AUTO_APPROVE else DIM}Auto-approve is {'on: commands run without asking' if AUTO_APPROVE else 'off: commands ask first'}.{RESET}\n")
                     continue
 
+                if AUTO_MODEL:
+                    level = await anyio.to_thread.run_sync(rate_difficulty, prompt, last_prompt)
+                    if AUTO_MODELS[level] != options.model:
+                        await client.set_model(AUTO_MODELS[level])
+                        options.model = AUTO_MODELS[level]
+                    print(f"{DIM}auto: {level} -> {options.model}{RESET}")
+                last_prompt = prompt
                 await client.query(prompt)
                 async for msg in client.receive_response():
                     if isinstance(msg, AssistantMessage):
