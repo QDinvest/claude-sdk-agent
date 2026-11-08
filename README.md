@@ -128,7 +128,7 @@ If your purchased balance went down, your promo grant doesn't cover the Agent SD
 
 ## Options
 
-Options go on the start command, not inside the chat. Typing `--budget 10` into a message does nothing.
+Options go on the start command, not inside the chat. Type them exactly as shown: no brackets, and no space after `--` (`--budget 50`, not `-- budget 50` or `[--budget 50]`).
 
 Inside the chat you can type:
 
@@ -136,6 +136,8 @@ Inside the chat you can type:
 |---|---|
 | `/model claude-opus-5-5` | Switch model without restarting |
 | `/budget 5` | Change the per-message spending cap. Reconnects to the same chat |
+| `/new` | Start a fresh chat in this folder |
+| `/help` | List these commands |
 | `/yes` | Turn auto-approve on or off |
 | `exit` | Quit (the chat is saved) |
 

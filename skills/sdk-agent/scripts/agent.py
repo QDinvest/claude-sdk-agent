@@ -89,8 +89,37 @@ async def ask_permission(tool_name, tool_input, context):
     return PermissionResultDeny(behavior="deny", message="The user declined this action.")
 
 
+PROG = os.path.basename(sys.argv[0]) or "agent.py"
+CHAT_HELP = """Inside the chat:
+  /model claude-opus-5-5   switch model
+  /budget 5                change the max US$ per message
+  /new                     start a fresh chat in this folder
+  /yes                     turn auto-approve on or off
+  /help                    show this list
+  exit                     quit (the chat is saved)"""
+
+
+def examples() -> str:
+    return f"""Examples (type options exactly as shown: no brackets, no space after --):
+  python {PROG} --budget 50
+  python {PROG} --model claude-opus-5-5 --budget 10
+  python {PROG} --new        start a fresh chat in this folder
+
+{CHAT_HELP}"""
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.exit(f"{message}\n\n{examples()}")
+
+
 async def main() -> None:
-    p = argparse.ArgumentParser(description="Claude agent chat on API credits")
+    p = Parser(
+        description="Claude agent chat on API credits",
+        usage=f"python {PROG} --model ID --budget USD --new --yes --dir FOLDER   (every option is optional)",
+        epilog=examples(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--dir", default=os.getcwd(), help="folder the agent works in (default: current folder)")
     p.add_argument("--new", action="store_true", help="start a fresh chat instead of continuing")
     p.add_argument("--model", default="claude-sonnet-5-5")
@@ -118,7 +147,7 @@ async def main() -> None:
     )
 
     print(f"{DIM}Folder: {folder}{RESET}")
-    print(f"{DIM}Model: {args.model} | {'continuing previous chat' if resume else 'new chat'} | type 'exit' to quit{RESET}")
+    print(f"{DIM}Model: {args.model} | {'continuing previous chat' if resume else 'new chat'} | /help for commands, 'exit' to quit{RESET}")
     if AUTO_APPROVE:
         print(f"{RED}--yes is on: commands run without asking.{RESET}")
     print()
@@ -160,6 +189,14 @@ async def main() -> None:
                     reconnect = True
                     print(f"{DIM}Budget is now ${value:.2f} per message. Reconnecting to the same chat...{RESET}\n")
                     break
+                if cmd == "/new":
+                    options.resume = None
+                    reconnect = True
+                    print(f"{DIM}Starting a new chat in this folder...{RESET}\n")
+                    break
+                if cmd == "/help":
+                    print(f"{DIM}{CHAT_HELP}{RESET}\n")
+                    continue
                 if cmd == "/yes":
                     AUTO_APPROVE = not AUTO_APPROVE
                     print(f"{RED if AUTO_APPROVE else DIM}Auto-approve is {'on: commands run without asking' if AUTO_APPROVE else 'off: commands ask first'}.{RESET}\n")
