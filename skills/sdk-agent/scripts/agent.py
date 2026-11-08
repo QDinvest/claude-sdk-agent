@@ -104,7 +104,12 @@ def load_history(session_id: str, folder: str):
 def show_recap(asks: list, replies: list) -> None:
     """Print where the chat left off: your last message and the start of Claude's last reply."""
     print(f"{BOLD}Where you left off{RESET} {DIM}· {len(asks)} messages so far{RESET}")
-    for who, color, text, max_lines in (("you", GREEN, asks[-1], 2), ("claude", ORANGE, replies[-1] if replies else "", 6)):
+    label, items = recent_tasks(asks, replies)
+    print(f"  {DIM}{label}{RESET}")
+    for item in items:
+        print(f"  {GREEN}{'✓' if label.startswith('Recently') else '·'}{RESET} {style(item[:WIDTH - 6])}")
+    print(f"  {DIM}Last exchange:{RESET}")
+    for who, color, text, max_lines in (("you", GREEN, asks[-1], 2), ("claude", ORANGE, replies[-1] if replies else "", 3)):
         lines = textwrap.wrap(" ".join(text.replace("#", "").split()), WIDTH - 12)
         if not lines:
             continue
@@ -144,21 +149,45 @@ hard: architecture or design, multi-file refactors, tricky debugging, performanc
 A short follow-up such as "yes", "do it" or "continue" has the same level as the previous request."""
 
 
-def rate_difficulty(prompt: str, previous: str) -> str:
-    """Ask Haiku how hard the request is. Falls back to medium if the call fails."""
-    text = f"Previous request: {previous[:1500] or '(none)'}\n\nThis request: {prompt[:3000]}"
-    body = json.dumps({"model": AUTO_MODELS["easy"], "max_tokens": 200, "system": ROUTER_PROMPT,
+def haiku(system: str, text: str, max_tokens: int = 200) -> str:
+    """One quick Haiku call, returning the reply text. Raises if the call fails."""
+    body = json.dumps({"model": AUTO_MODELS["easy"], "max_tokens": max_tokens, "system": system,
                        "messages": [{"role": "user", "content": text}]}).encode("utf-8")
     req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
         "x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01",
         "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        reply = json.loads(r.read().decode("utf-8"))
+    return " ".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text")
+
+
+def rate_difficulty(prompt: str, previous: str) -> str:
+    """Ask Haiku how hard the request is. Falls back to medium if the call fails."""
+    text = f"Previous request: {previous[:1500] or '(none)'}\n\nThis request: {prompt[:3000]}"
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            reply = json.loads(r.read().decode("utf-8"))
-        word = " ".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text").lower()
+        word = haiku(ROUTER_PROMPT, text).lower()
     except Exception:
         return "medium"
     return next((level for level in ("hard", "medium", "easy") if level in word), "medium")
+
+
+RECAP_PROMPT = """You get the end of a chat between a user and a coding agent.
+List the 3 most recent tasks the agent completed, newest first. One line each, at most 12 words,
+plain past tense, each line starting with "- ". Only list work that was actually done."""
+
+
+def recent_tasks(asks: list, replies: list) -> list:
+    """Three short bullets of recently finished work, written by Haiku (under a cent)."""
+    text = ("User requests, oldest first:\n" + "\n".join(f"- {a[:300]}" for a in asks[-6:])
+            + "\n\nAgent's latest replies, oldest first:\n" + "\n\n".join(r[:800] for r in replies[-4:]))
+    try:
+        lines = haiku(RECAP_PROMPT, text, 300).splitlines()
+        items = [l.strip().lstrip("-•* ").strip() for l in lines if l.strip().startswith(("-", "•", "*"))]
+    except Exception:
+        items = []
+    if items:
+        return "Recently done:", items[:3]
+    return "Your last requests:", [" ".join(a.split())[:90] for a in asks[-3:][::-1]]  # when Haiku can't be reached
 
 
 AUTO_APPROVE = False  # set by --yes

@@ -23,6 +23,11 @@ PS C:\Users\you\codemap> python $HOME\claude-sdk-agent\skills\sdk-agent\scripts\
 └ /help for commands · exit to quit
 
 Where you left off · 12 messages so far
+  Recently done:
+  ✓ Fixed the bugs found in the codemap audit
+  ✓ Added a self-test for the new query paths
+  ✓ Rewrote PLAN.md as v2
+  Last exchange:
   you     can you bring up the plan for building this codemap
   claude  Status: nothing is built yet. The only file in codemap is PLAN.md.
           The plan: 1. No installs: one Python stdlib script ... …
@@ -41,7 +46,7 @@ you › check that python works here
 you › exit
 ```
 
-- When you come back to a folder, the box at the top shows the chat's title and when you last used it, then **Where you left off** shows your last message and the start of Claude's last reply. It's read from the saved chat, so it costs nothing.
+- When you come back to a folder, the box at the top shows the chat's title and when you last used it, then **Where you left off** lists the 3 most recent finished tasks, plus your last message and the start of Claude's last reply. The 3 tasks come from one quick Haiku call (under a cent). If that call fails, you see your last 3 requests instead.
 - Lines starting with `·` are what the agent is doing: reading, searching, writing.
 - `? Allow ...` is the agent asking first. Type `y` to allow, `a` to stop asking about that kind of action for this run, or press Enter to refuse.
 - The line after each reply shows what that message cost, the total since you started, and the model used.
