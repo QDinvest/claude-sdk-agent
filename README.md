@@ -42,6 +42,7 @@ you › check that python works here
   Python 3.11.9 is installed, so the script will run here.
 
 ── done · this message $0.0312 · total this run $0.0312 · claude-sonnet-5-5 ──────
+   context █░░░░░░░░░ 6% · 41k of 650k · auto-compacts at 65%
 
 you › exit
 ```
@@ -50,6 +51,7 @@ you › exit
 - Lines starting with `·` are what the agent is doing: reading, searching, writing.
 - `? Allow ...` is the agent asking first. Type `y` to allow, `a` to stop asking about that kind of action for this run, or press Enter to refuse.
 - The line after each reply shows what that message cost, the total since you started, and the model used.
+- The `context` line shows how full the chat's memory is. Past 65%, the agent runs `/compact` by itself: it summarizes the older part of the chat so you can keep going, and the compact's cost shows on its own line.
 - In a real terminal it's in color: your prompt green, Claude orange, tool steps dimmed, permission prompts yellow.
 
 ## Setup, step by step
@@ -136,6 +138,7 @@ Inside the chat you can type:
 | `/auto` | Turn the difficulty-based auto-switch on or off |
 | `/budget 5` | Change the per-message spending cap. Reconnects to the same chat |
 | `/new` | Start a fresh chat in this folder |
+| `/compact` | Shrink the chat's context now (happens by itself at 65%) |
 | `/help` | List these commands |
 | `/yes` | Turn auto-approve on or off |
 | `exit` | Quit (the chat is saved) |

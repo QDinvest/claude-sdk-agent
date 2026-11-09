@@ -121,6 +121,25 @@ def show_recap(asks: list, replies: list) -> None:
     print()
 
 
+COMPACT_AT = 65  # % of the model's context window; past this, the agent runs /compact after the reply
+
+
+async def context_usage(client):
+    """(percent used, tokens used, window size) for the current chat. Read locally, costs nothing."""
+    try:
+        u = await client.get_context_usage()
+        return 100 * u["totalTokens"] / u["rawMaxTokens"], u["totalTokens"], u["rawMaxTokens"]
+    except Exception:
+        return None
+
+
+def context_line(pct: float, used: int, window: int) -> str:
+    color = GREEN if pct < 50 else YELLOW if pct < COMPACT_AT else RED
+    filled = max(0, min(10, round(pct / 10)))
+    return (f"   {DIM}context{RESET} {color}{'█' * filled}{RESET}{DIM}{'░' * (10 - filled)} {pct:.0f}%"
+            f" · {used // 1000}k of {window // 1000}k · auto-compacts at {COMPACT_AT}%{RESET}")
+
+
 def load_sessions() -> dict:
     try:
         return json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
@@ -216,6 +235,7 @@ CHAT_HELP = """Inside the chat:
   /auto                    pick the model by task difficulty, on or off
   /budget 5                change the max US$ per message
   /new                     start a fresh chat in this folder
+  /compact                 shrink the chat's context now (happens by itself at 65%)
   /yes                     turn auto-approve on or off
   /help                    show this list
   exit                     quit (the chat is saved)"""
@@ -354,29 +374,40 @@ async def main() -> None:
                         options.model = AUTO_MODELS[level]
                     print(f"{DIM}auto: {level} -> {options.model}{RESET}")
                 last_prompt = prompt
-                await client.query(prompt)
-                async for msg in client.receive_response():
-                    if isinstance(msg, AssistantMessage):
-                        for block in msg.content:
-                            if isinstance(block, TextBlock) and block.text.strip():
-                                print(f"\n{ORANGE}{BOLD}● claude{RESET}\n{indent(style(block.text.strip()))}")
-                            elif isinstance(block, ToolUseBlock):
-                                print(describe_tool(block))
-                    elif isinstance(msg, ResultMessage):
-                        if msg.session_id:
-                            save_session(folder, msg.session_id)
-                            options.resume = msg.session_id  # so a reconnect continues this chat
-                        total = msg.total_cost_usd
-                        if total is None:
-                            cost = "cost n/a"
-                        else:
-                            # total_cost_usd is the running total for this connection; the difference is this message.
-                            this_msg = total - client_total if total >= client_total else total
-                            client_total = total
-                            run_total += this_msg
-                            cost = f"this message ${this_msg:.4f} · total this run ${run_total:.4f}"
-                        status = f"{RED}error: {msg.subtype}{RESET}{DIM}" if msg.is_error else "done"
-                        print(f"\n{rule(f'{status} · {cost} · {options.model}')}\n")
+                send = prompt
+                while send:  # one pass, plus one more to run /compact when context passes COMPACT_AT
+                    compacting = send == "/compact"
+                    await client.query(send)
+                    send = None
+                    async for msg in client.receive_response():
+                        if isinstance(msg, AssistantMessage):
+                            for block in msg.content:
+                                if isinstance(block, TextBlock) and block.text.strip():
+                                    print(f"\n{ORANGE}{BOLD}● claude{RESET}\n{indent(style(block.text.strip()))}")
+                                elif isinstance(block, ToolUseBlock):
+                                    print(describe_tool(block))
+                        elif isinstance(msg, ResultMessage):
+                            if msg.session_id:
+                                save_session(folder, msg.session_id)
+                                options.resume = msg.session_id  # so a reconnect continues this chat
+                            total = msg.total_cost_usd
+                            if total is None:
+                                cost = "cost n/a"
+                            else:
+                                # total_cost_usd is the running total for this connection; the difference is this message.
+                                this_msg = total - client_total if total >= client_total else total
+                                client_total = total
+                                run_total += this_msg
+                                cost = f"{'compact' if compacting else 'this message'} ${this_msg:.4f} · total this run ${run_total:.4f}"
+                            status = f"{RED}error: {msg.subtype}{RESET}{DIM}" if msg.is_error else "done"
+                            print(f"\n{rule(f'{status} · {cost} · {options.model}')}")
+                    usage = await context_usage(client)
+                    if usage:
+                        print(context_line(*usage))
+                        if usage[0] >= COMPACT_AT and not compacting:
+                            print(f"   {YELLOW}Context is past {COMPACT_AT}%. Compacting the chat so it can keep going...{RESET}")
+                            send = "/compact"
+                    print()
         if not reconnect:
             return
 
